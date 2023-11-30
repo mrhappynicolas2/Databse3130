@@ -7,3 +7,6 @@ CSI3130 Group project
 
 Team:
 Nicolas Bérubé 300239551
+
+I think the Buildwork folder is the build of the postgres16 folder?
+the C files can be found there
