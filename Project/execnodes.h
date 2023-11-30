@@ -1082,14 +1082,14 @@ typedef struct MergeJoinState
 	ExprContext *mj_InnerEContext;
 } MergeJoinState;
 
-/* ----------------
+/* ---------------- E = Edited, A = Added
  *	 HashJoinState information
  *
- *		hj_HashTable			hash table for the hashjoin
+ *E		hj_OuterHashTable;			outer hash table for the hashjoin
  *								(NULL if table not built yet)
- *		hj_CurHashValue			hash value for current outer tuple
- *		hj_CurBucketNo			bucket# for current outer tuple
- *		hj_CurTuple				last inner tuple matched to current outer
+ *		hj_OuterCurHashValue			hash value for current outer tuple
+ *E		hj_OuterCurBucketNo;		bucket# for current outer tuple
+ *E		hj_OuterCurTuple;			last inner tuple matched to current outer
  *								tuple, or NULL if starting search
  *								(CurHashValue, CurBucketNo and CurTuple are
  *								 undefined if OuterTupleSlot is empty!)
@@ -1097,12 +1097,28 @@ typedef struct MergeJoinState
  *		hj_InnerHashKeys		the inner hash keys in the hashjoin condition
  *		hj_HashOperators		the join operators in the hashjoin condition
  *		hj_OuterTupleSlot		tuple slot for outer tuples
- *		hj_HashTupleSlot		tuple slot for hashed tuples
+ *E		hj_OuterHashTupleSlot;		tuple slot for hashed tuples
  *		hj_NullInnerTupleSlot	prepared null tuple for left outer joins
  *		hj_FirstOuterTupleSlot	first tuple retrieved from outer plan
  *		hj_NeedNewOuter			true if need new outer tuple on next call
  *		hj_MatchedOuter			true if found a join match for current outer
  *		hj_OuterNotEmpty		true if outer relation known not empty
+ *
+ *  NEW STUFF
+ * 
+ *A 	hj_InnerFetched; // true if succesfuly found a tuple in inner relation
+ *A		hj_InnerProbing; // Number of tuples probed from inner relation
+ *A		hj_OuterProbing; // Number of tuples probed from outer relation
+ *A 	hj_InnerNotEmpty; // true if inner relation known not empty
+ *A 	hj_MatchedInner; // true if found a join match for current inner
+ *A 	hj_NeedNewInner; //  true if need new inner tuple on next call
+ *A 	*hj_FirstInnerTupleSlot; //   first tuple retrieved from inner plan
+ *A 	*hj_InnerHashTupleSlot; // tuple slot for hashed tuples
+ *A 	*hj_InnerTupleSlot; // tuple slot for inner tuples
+ *A 	hj_InnerCurTuple; // last inner tuple matched to current inner
+ *A 	hj_InnerCurBucketNo; //  bucket# for current inner tuple
+ *A 	hj_InnerCurHashValue; //  hash value for current inner tuple
+ *A 	hj_InnerHashTable; //  inner hash table for the hashjoin (NULL if table not built yet)
  * ----------------
  */
 
@@ -1112,25 +1128,42 @@ typedef struct HashJoinTableData *HashJoinTable;
 
 // CSI3530 Beaucoup de modifications a faire ici 
 // CSI3130 You've got to make some serious changes here
-//TODO: Changes are needed here - nicolas
+//TODO: changes have been done
 typedef struct HashJoinState
 {
 	JoinState	js;				/* its first field is NodeTag */
 	List	   *hashclauses;	/* list of ExprState nodes */
-	HashJoinTable hj_HashTable;
-	uint32		hj_CurHashValue;
-	int			hj_CurBucketNo;
-	HashJoinTuple hj_CurTuple;
+	HashJoinTable hj_OuterHashTable; //Changed
+	HashJoinTable hj_InnerHashTable; // Added
+	uint32		hj_OuterCurHashValue;
+	uint32		hj_InnerCurHashValue; // Added
+	int			hj_OuterCurBucketNo; // Changed
+	int			hj_InnerCurBucketNo; // Added
+	HashJoinTuple hj_OuterCurTuple; // Changed
+	HashJoinTuple hj_InnerCurTuple; // Added
 	List	   *hj_OuterHashKeys;		/* list of ExprState nodes */
 	List	   *hj_InnerHashKeys;		/* list of ExprState nodes */
 	List	   *hj_HashOperators;		/* list of operator OIDs */
 	TupleTableSlot *hj_OuterTupleSlot;
-	TupleTableSlot *hj_HashTupleSlot;
+	TupleTableSlot *hj_InnerTupleSlot; // Added
+	TupleTableSlot *hj_OuterHashTupleSlot; // Changed
+	TupleTableSlot *hj_InnerHashTupleSlot; // Added
 	TupleTableSlot *hj_NullInnerTupleSlot;
 	TupleTableSlot *hj_FirstOuterTupleSlot;
+	TupleTableSlot *hj_FirstInnerTupleSlot; // Added
 	bool		hj_NeedNewOuter;
+	bool		hj_NeedNewInner; // Added
 	bool		hj_MatchedOuter;
+	bool		hj_MatchedInner; // Added
 	bool		hj_OuterNotEmpty;
+	bool		hj_InnerNotEmpty; // Added
+	bool 		hj_InnerExhausted; // Added
+	bool 		hj_OuterExhausted; // Added
+	bool 		hj_InnerFetched; // Added
+	int 		hj_InnerProbing; // Added
+	int 		hj_OuterProbing; // Added
+
+	//TODO: maybe more stuff is needed?
 } HashJoinState;
 
 

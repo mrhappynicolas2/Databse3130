@@ -46,19 +46,21 @@ TupleTableSlot *				/* return: a tuple or NULL */
 ExecHashJoin(HashJoinState *node)
 {
 	EState	   *estate;
-	PlanState  *outerNode; //FIXME: should this be HashState or PlanState?
-	PlanState  *innerNode;// FIXME: CSI3530 il faut un innerNode aussi //CSI3130 You need an inner node too
-	HashState  *hashNode;
+	HashState  *outerHashNode; //edited by nicolas
+	HashState *innerHashNode; //added by niolas // CSI3530 il faut un innerNode aussi //CSI3130 You need an inner node too
+	//HashState  *hashNode; //removed by nicolas 
 	List	   *joinqual;
 	List	   *otherqual;
 	TupleTableSlot *inntuple;
-	TupleTableSlot *outtuple;//FINISHED: CSI3530 il faut un outer_hashtable aussi //CSI 3130 You need an outer_hashtable node too
+	TupleTableSlot *outertuple; //added by nicolas // CSI3530 il faut un outer_hashtable aussi //CSI 3130 You need an outer_hashtable node too
 	ExprContext *econtext;
 	ExprDoneCond isDone;
-	HashJoinTable hashtable;
+	HashJoinTable innerHashTable; //added by nicolas
+	HashJoinTable outterHashTable; //added by nicolas
+	//HashJoinTable hashtable; //removed by nicolas (replaced with inner nad outter)
 	HeapTuple	curtuple;
 	TupleTableSlot *outerTupleSlot;
-    // CSI3530 il faut un innerTupleSlot aussi //CSI3130 You need an innerTupleSlot too
+    TupleTableSlot *innerTupleSlot; //added by nicolas //CSI3530 il faut un innerTupleSlot aussi //CSI3130 You need an innerTupleSlot too
 	uint32		hashvalue;
 	int			batchno;
 
@@ -68,13 +70,13 @@ ExecHashJoin(HashJoinState *node)
 	estate = node->js.ps.state;
 	joinqual = node->js.joinqual;
 	otherqual = node->js.ps.qual;
-	hashNode = (HashState *) innerPlanState(node);
-	outerNode = outerPlanState(node);
-	// CSI3530 and CSI3130 ...
+	innerHashNode = (HashState *) innerPlanState(node); // edited by nicolas
+	outerHashNode = (HashState *) outerPlanState(node); // edited by nicolas	// CSI3530 and CSI3130 ...
 
 	/*
 	 * get information from HashJoin state
 	 */
+	//TODO: change this to innerHashTable or outerHashTable, HJ_hashtable might also need to be changed because I changed the stuff in headerfile - nicolas
 	hashtable = node->hj_HashTable;
     // CSI3530 and CSI3130 ...
 	econtext = node->js.ps.ps_ExprContext;

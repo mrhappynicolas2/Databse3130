@@ -1505,8 +1505,8 @@ create_hashjoin_plan(PlannerInfo *root,
 							  hashclauses,
 							  outer_plan,
 							  //(Plan *) hash_plan,
-								(Plan *) innerHashPlan,
-								(Plan *) outterHashPlan,
+								(Plan *) innerHashPlan, //added by nicolas
+								(Plan *) outterHashPlan, //added by nicolas
 							  // CSI3530 //CSI3130 ...
 							  best_path->jpath.jointype);
 
