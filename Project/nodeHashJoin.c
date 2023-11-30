@@ -46,13 +46,13 @@ TupleTableSlot *				/* return: a tuple or NULL */
 ExecHashJoin(HashJoinState *node)
 {
 	EState	   *estate;
-	PlanState  *outerNode;
-	// CSI3530 il faut un innerNode aussi //CSI3130 You need an inner node too
+	PlanState  *outerNode; //FIXME: should this be HashState or PlanState?
+	PlanState  *innerNode;// FIXME: CSI3530 il faut un innerNode aussi //CSI3130 You need an inner node too
 	HashState  *hashNode;
 	List	   *joinqual;
 	List	   *otherqual;
 	TupleTableSlot *inntuple;
-	// CSI3530 il faut un outer_hashtable aussi //CSI 3130 You need an outer_hashtable node too
+	TupleTableSlot *outtuple;//FINISHED: CSI3530 il faut un outer_hashtable aussi //CSI 3130 You need an outer_hashtable node too
 	ExprContext *econtext;
 	ExprDoneCond isDone;
 	HashJoinTable hashtable;

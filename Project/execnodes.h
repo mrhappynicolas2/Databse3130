@@ -1112,6 +1112,7 @@ typedef struct HashJoinTableData *HashJoinTable;
 
 // CSI3530 Beaucoup de modifications a faire ici 
 // CSI3130 You've got to make some serious changes here
+//TODO: Changes are needed here - nicolas
 typedef struct HashJoinState
 {
 	JoinState	js;				/* its first field is NodeTag */

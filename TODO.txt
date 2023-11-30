@@ -1,0 +1,25 @@
+2023-10-18 - Nicolas Berube
+Added the project file and the source code
+
+2023-11-30 - Nicolas Berube
+- Started working on the project
+- Realised that the work is needed in the project folder (files given by prof)
+
+createplan.c 
+- should be finished
+
+execnodes.h 
+- did the first part, but still need to do second part MARKED BY "TODO:" 
+
+nodeHash.c
+- Copied the MultiExecHash into the ExecHash, other changes might be needed (is it normal that it reutrns null everytime?) (Marked by "TODO:"
+- Changed the hashtable->growEnabled from true to false (marked by "FIXME:")
+- ExecScanHashBucket might need changes (none done by me and marked by "TODO:")
+
+NodeHashJoin.c 
+- should the HashNode be hashState or PlanState? (Marked by "FIXME")
+- added TupleTableSlot *outtuple; (marked by "FINISHED:")
+- Will continue after lunch
+
+??? - ???
+Insert your comments here on what you did
