@@ -1,23 +1,17 @@
 # Databse3130 Group Project for the University of Ottawa
 CSI3130 Group project
 
-2023-10-18 - Nicolas
-- Created the REPO
-- Added some files
+# Team:
+Nicolas Bérubé - 300239551
 
-Team:
-Nicolas Bérubé 300239551
 
-I think the Buildwork folder is the build of the postgres16 folder?
-the C files can be found there
-
-#Objective:
+# Objective:
 new symmetric hash join query operator to replace currnet hash join
 
-#What is a symmetric hashjoin
+# What is a symmetric hashjoin
 2 hash tables with two hash functions
 
-#Files to be updated:
+# Files to be updated (project folder):
 
 postgreql-160/src/executor/nodeHashJoin. (processing of hash join operator)
 
