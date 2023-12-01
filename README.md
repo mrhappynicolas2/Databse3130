@@ -4,6 +4,8 @@ CSI3130 Group project
 # Team:
 Nicolas Bérubé - 300239551
 
+Joseph Peters - 300024207
+
 
 # Objective:
 new symmetric hash join query operator to replace currnet hash join
