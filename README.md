@@ -6,6 +6,8 @@ Nicolas Bérubé - 300239551
 
 Joseph Peters - 300024207
 
+Joshua Zan - 300242310
+
 
 # Objective:
 new symmetric hash join query operator to replace currnet hash join
