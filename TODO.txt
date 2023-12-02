@@ -24,6 +24,11 @@ NodeHashJoin.c
 - Cant continue because im missing stuff from header file
 - Added a TODO: marking where I left off (line 79)
 
+2023-12-02 - Josh Zan
+
+nodeHash.c
+- Updates to ExecScanHashJoin to incorporate inner and outer, all changes should have comments
+- There are a few FIXMEs where I'm worried about something not working
 
 ??? - ???
 Insert your comments here on what you did

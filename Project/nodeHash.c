@@ -812,22 +812,47 @@ ExecHashGetBucketAndBatch(HashJoinTable hashtable,
  *
  * The current outer tuple must be stored in econtext->ecxt_outertuple.
  */
-HeapTuple
-ExecScanHashBucket(HashJoinState *hjstate,
-				   ExprContext *econtext)
+HashTuple // Changed this to return a Hashtuple instead of HeapTuple (return stmt also updated) - Josh
+ExecScanHashBucket(HashJoinState* hjstate,
+	ExprContext* econtext)
 {
-	//TODO: does this need to be changed? - Nicolas
-	List	   *hjclauses = hjstate->hashclauses;
-	HashJoinTable hashtable = hjstate->hj_HashTable;
-	HashJoinTuple hashTuple = hjstate->hj_CurTuple;
-	uint32		hashvalue = hjstate->hj_CurHashValue;
+	List* hjclauses = hjstate->hashclauses; // FIXME: Not sure if this needs a change or not - Josh
+
+	// Removed the inital values here since they are added below - Josh
+	HashJoinTable hashtable;
+	HashJoinTuple hashTuple;
+	uint32 hashvalue;
+
+	// Added these two ints based on the sample implementation - Josh
+	int bucketNo;
+	TupleTableSlot hashTupSlot // Added, was not in sample implementation but I think its needed - Josh
+		//int tupleSlot; // FIXME: This var appears to serve no purpose in the current implementation - Josh
+
+		// Added this if else statement based on the sample implementation - Josh
+		if (hjstate->InnerProbing) {
+			hashtable = hjstate->hj_InnerHashTable;
+			hashTuple = hjstate->hj_InnerCurTuple;
+			hashvalue = hjstate->hj_InnerCurHashValue;
+			bucketNo = hjstate->hj_InnerCurBucketNo;
+			hashTupSlot = hjstate->hj_InnerHashTupleSlot
+				//tupleSlot = hjstate->hj_InnerTupleSlot;
+		}
+		else {
+			hashtable = hjstate->hj_OuterHashTable;
+			hashTuple = hjstate->hj_OuterCurTuple;
+			hashvalue = hjstate->hj_OuterCurHashValue;
+			bucketNo = hjstate->hj_OuterCurBucketNo;
+			hashTupSlot = hjstate->hj_OuterHashTupleSlot
+				//tupleSlot = hjstate->hj_OuterTupleSlot;
+		}
+
 
 	/*
 	 * hj_CurTuple is NULL to start scanning a new bucket, or the address of
 	 * the last tuple returned from the current bucket.
 	 */
 	if (hashTuple == NULL)
-		hashTuple = hashtable->buckets[hjstate->hj_CurBucketNo];
+		hashTuple = hashtable->buckets[bucketNo]; // Changed the [] to include bucketNo var instead of hjstate->hj_CurBucketNo - Josh
 	else
 		hashTuple = hashTuple->next;
 
@@ -835,14 +860,14 @@ ExecScanHashBucket(HashJoinState *hjstate,
 	{
 		if (hashTuple->hashvalue == hashvalue)
 		{
-			HeapTuple	heapTuple = &hashTuple->htup;
-			TupleTableSlot *inntuple;
+			HeapTuple heapTuple = &hashTuple->htup;
+			TupleTableSlot* inntuple;
 
 			/* insert hashtable's tuple into exec slot so ExecQual sees it */
 			inntuple = ExecStoreTuple(heapTuple,
-									  hjstate->hj_HashTupleSlot,
-									  InvalidBuffer,
-									  false);	/* do not pfree */
+				hashTupSlot, // Changed - Josh
+				InvalidBuffer,
+				false);    /* do not pfree */
 			econtext->ecxt_innertuple = inntuple;
 
 			/* reset temp memory each time to avoid leaks from qual expr */
@@ -850,8 +875,14 @@ ExecScanHashBucket(HashJoinState *hjstate,
 
 			if (ExecQual(hjclauses, econtext, false))
 			{
-				hjstate->hj_CurTuple = hashTuple;
-				return heapTuple;
+				if (hjstate->InnerProbing) { // FIXME: added this if statement but not sure if it will produce the correct results - Josh
+					hjstate->hj_InnerCurTuple = hashTuple;
+				}
+				else {
+					hjstate->hj_OuterCurTuple = hashTuple;
+				}
+
+				return hashTuple; // FIXME: changed this to return hashTuple, might lead to errors? - Josh
 			}
 		}
 
