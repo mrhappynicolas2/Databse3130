@@ -4845,22 +4845,22 @@ create_hashjoin_plan(PlannerInfo *root,
 						  skewColumn,
 						  skewInherit); // added by nicolas
 	outterHashPlan = make_hash(outer_plan,
-						  inner_hashkeys,
+						  outer_hashkeys,
 						  skewTable,
 						  skewColumn,
 						  skewInherit); //added by nicolas
-	//hash_plan = make_hash(inner_plan,
+	/*hash_plan = make_hash(inner_plan,
 	//					  inner_hashkeys,
 	//					  skewTable,
 	//					  skewColumn,
-	//					  skewInherit); // removed by nicolas and replaced by two other
+	//					  skewInherit); // removed by nicolas and replaced by two other */
 
 	/*
 	 * Set Hash node's startup & total costs equal to total cost of input
 	 * plan; this only affects EXPLAIN display not decisions.
 	 */
-	copy_plan_costsize(&hash_plan->plan, inner_plan);
-	hash_plan->plan.startup_cost = hash_plan->plan.total_cost;
+	copy_plan_costsize(&innerHashPlan->plan, inner_plan);
+	innerHashPlan->plan.startup_cost = innerHashPlan->plan.total_cost;
 
 	/*
 	 * If parallel-aware, the executor will also need an estimate of the total
@@ -4869,8 +4869,8 @@ create_hashjoin_plan(PlannerInfo *root,
 	 */
 	if (best_path->jpath.path.parallel_aware)
 	{
-		hash_plan->plan.parallel_aware = true;
-		hash_plan->rows_total = best_path->inner_rows_total;
+		innerHashPlan->plan.parallel_aware = true;
+		innerHashPlan->rows_total = best_path->inner_rows_total;
 	}
 
 	join_plan = make_hashjoin(tlist,
@@ -4881,8 +4881,8 @@ create_hashjoin_plan(PlannerInfo *root,
 							  hashcollations,
 							  outer_hashkeys,
 							  //(Plan *) hash_plan, removed and replaced by two bottom
-							  (Plan *) innerHashPlan, //added by nicolas
 							  (Plan *) outterHashPlan, //added by nicolas // CSI3530 //CSI3130 ...
+							  (Plan *) innerHashPlan, //added by nicolas
 							  best_path->jpath.jointype,
 							  best_path->jpath.inner_unique);
 
