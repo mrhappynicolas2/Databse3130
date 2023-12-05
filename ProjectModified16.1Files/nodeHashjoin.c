@@ -221,16 +221,14 @@ static pg_attribute_always_inline TupleTableSlot *
 ExecHashJoinImpl(PlanState *pstate, bool parallel)
 {
 	HashJoinState *node = castNode(HashJoinState, pstate);
-	HashState  *outerHashNode; //edited by nicolas
-	HashState *innerHashNode; //added by niolas // CSI3530 il faut un innerNode aussi //CSI3130 You need an inner node too
+	
 	//HashState  *hashNode; //removed by nicolas 
 	ExprState  *joinqual;
 	ExprState  *otherqual;
 	ExprContext *econtext;
 	TupleTableSlot *inntuple;
 	TupleTableSlot *outertuple; //added by nicolas // CSI3530 il faut un outer_hashtable aussi //CSI 3130 You need an outer_hashtable node too
-	HashJoinTable innerHashTable; //added by nicolas
-	HashJoinTable outterHashTable; //added by nicolas
+	
 	//HashJoinTable hashtable; //removed by nicolas (replaced with inner nad outter)
 	TupleTableSlot *outerTupleSlot;
 	TupleTableSlot *innerTupleSlot; //added by nicolas //CSI3530 il faut un innerTupleSlot aussi //CSI3130 You need an innerTupleSlot too
@@ -238,19 +236,30 @@ ExecHashJoinImpl(PlanState *pstate, bool parallel)
 	int			batchno;
 	ParallelHashJoinState *parallel_state;
 
+	// These vars were changed to have inner/outer version, changed them back to one to make modifying the code easier - Josh
+	// if statement below is how they differentiate between inner/outer
+	HashState* hashNode;
+	HashJoinTable hashTable; 
+
 	/*
 	 * get information from HashJoin node
 	 */
 	joinqual = node->js.joinqual;
 	otherqual = node->js.ps.qual;
-	innerHashNode = (HashState *) innerPlanState(node); // edited by nicolas
-	outerHashNode = (HashState *) outerPlanState(node); // edited by nicolas
+	
 	/*
 	 * get information from HashJoin state
 	 */
-	//TODO: change this to innerHashTable or outerHashTable, HJ_hashtable might also need to be changed because I changed the stuff in headerfile - nicolas
-	hashtable = node->hj_HashTable;
-    // CSI3530 and CSI3130 ...
+	if (node->hj_InnerProbing) { // Added by Josh
+		hashTable = node->hj_InnerHashTable;
+		hashNode = (HashState*)innerPlanState(node);
+	}
+	else {
+		hashTable = node->hj_OuterHashTable;
+		hashNode = (HashState*)outerPlanState(node);
+	}
+	
+    // CSI3530 and CSI3130 ... 
 	econtext = node->js.ps.ps_ExprContext;
 	parallel_state = hashNode->parallel_state;
 
@@ -347,7 +356,13 @@ ExecHashJoinImpl(PlanState *pstate, bool parallel)
 												node->hj_HashOperators,
 												node->hj_Collations,
 												HJ_FILL_INNER(node));
-				node->hj_HashTable = hashtable;
+				if (node->hj_InnerProbing) { // Added by Josh (sidenote: is there an easier way to do this?)
+					node->hj_InnerHashTable = hashtable;
+				}
+				else {
+					node->hj_HashTable = hashtable;
+				}
+				
 
 				/*
 				 * Execute the Hash node, to build the hash table.  If using
@@ -481,19 +496,32 @@ ExecHashJoinImpl(PlanState *pstate, bool parallel)
 				 * Find the corresponding bucket for this tuple in the main
 				 * hash table or skew hash table.
 				 */
-				node->hj_CurHashValue = hashvalue;
-				ExecHashGetBucketAndBatch(hashtable, hashvalue,
-										  &node->hj_CurBucketNo, &batchno);
-				node->hj_CurSkewBucketNo = ExecHashGetSkewBucket(hashtable,
-																 hashvalue);
-				node->hj_CurTuple = NULL;
+				if (node->hj_InnerProbing) { // Added this if else statement to account for inner/outer - Josh
+					node->hj_InnerCurHashValue = hashvalue;
+					ExecHashGetBucketAndBatch(hashtable, hashvalue,
+						&node->hj_InnerCurBucketNo, &batchno);
+					node->hj_InnerCurSkewBucketNo = ExecHashGetSkewBucket(hashtable,
+						hashvalue);
+					node->hj_InnerCurTuple = NULL;
+				}
+				else {
+					node->hj_OuterCurHashValue = hashvalue;
+					ExecHashGetBucketAndBatch(hashtable, hashvalue,
+						&node->hj_OuterCurBucketNo, &batchno);
+					node->hj_OuterCurSkewBucketNo = ExecHashGetSkewBucket(hashtable,
+						hashvalue);
+					node->hj_OuterCurTuple = NULL;
+				}
+				
 
 				/*
 				 * The tuple might not belong to the current batch (where
 				 * "current batch" includes the skew buckets if any).
 				 */
+				// Updated this if condition to account for inner/outer - Josh
 				if (batchno != hashtable->curbatch &&
-					node->hj_CurSkewBucketNo == INVALID_SKEW_BUCKET_NO)
+					((node->hj_InnerProbing && node->hj_InnerCurSkewBucketNo == INVALID_SKEW_BUCKET_NO) ||
+						(!node->hj_InnerProbing && node->hj_OuterCurSkewBucketNo == INVALID_SKEW_BUCKET_NO)))
 				{
 					bool		shouldFree;
 					MinimalTuple mintuple = ExecFetchSlotMinimalTuple(outerTupleSlot,
@@ -857,16 +885,26 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 	/*
 	 * initialize hash-specific info
 	 */
-	hjstate->hj_HashTable = NULL;
+	// Updated initializations below to have inner and outer versions - Josh
+	// FIXME: Is that what we were meant to do, or was it meant to be something like the if/else statement in ExecScanHashBucket?
+	hjstate->hj_InnerHashTable = NULL;
+	hjstate->hj_OuterHashTable = NULL;
 	//CSI3530 and CSI3130...
 	hjstate->hj_FirstOuterTupleSlot = NULL;
+	hjstate->hj_FirstInnerTupleSlot = NULL;
 
 	//CSI3530 Plein d'initialisations a faire ici // CSI3130 Initialize here
-	hjstate->hj_CurHashValue = 0;
-	hjstate->hj_CurBucketNo = 0;
-	hjstate->hj_CurSkewBucketNo = INVALID_SKEW_BUCKET_NO;
-	hjstate->hj_CurTuple = NULL;
+	hjstate->hj_InnerCurHashValue = 0;
+	hjstate->hj_OuterCurHashValue = 0;
+	hjstate->hj_InnerCurBucketNo = 0;
+	hjstate->hj_OuterCurBucketNo = 0;
+	hjstate->hj_InnerCurSkewBucketNo = INVALID_SKEW_BUCKET_NO;
+	hjstate->hj_OuterCurSkewBucketNo = INVALID_SKEW_BUCKET_NO;
+	hjstate->hj_InnerCurTuple = NULL;
+	hjstate->hj_OuterCurTuple = NULL;
 
+	hjstate->hj_InnerHashKeys = ExecInitExprList(node->hashkeys,
+		(PlanState*)hjstate);
 	hjstate->hj_OuterHashKeys = ExecInitExprList(node->hashkeys,
 												 (PlanState *) hjstate);
 	hjstate->hj_HashOperators = node->hashoperators;
@@ -874,7 +912,9 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 
 	hjstate->hj_JoinState = HJ_BUILD_HASHTABLE;
 	hjstate->hj_MatchedOuter = false;
+	hjstate->hj_MatchedInner = false;
 	hjstate->hj_OuterNotEmpty = false;
+	hjstate->hj_InnerNotEmpty = false;
 
 	return hjstate;
 }
@@ -891,10 +931,17 @@ ExecEndHashJoin(HashJoinState *node)
 	/*
 	 * Free hash table
 	 */
-	if (node->hj_HashTable)
+	// Updated the below statement + added outer version - Josh (is this correct or should it only clear one side?)
+	if (node->hj_InnerHashTable)
 	{
-		ExecHashTableDestroy(node->hj_HashTable);
-		node->hj_HashTable = NULL;
+		ExecHashTableDestroy(node->hj_InnerHashTable);
+		node->hj_InnerHashTable = NULL;
+	}
+
+	if (node->hj_OuterHashTable)
+	{
+		ExecHashTableDestroy(node->hj_OuterHashTable);
+		node->hj_OuterHashTable = NULL;
 	}
 
 	/*
@@ -907,8 +954,10 @@ ExecEndHashJoin(HashJoinState *node)
 	 */
 	ExecClearTuple(node->js.ps.ps_ResultTupleSlot);
 	ExecClearTuple(node->hj_OuterTupleSlot);
+	ExecClearTuple(node->hj_InnerTupleSlot); // Added
 	// CSI3530 and CSI3130 ...
-	ExecClearTuple(node->hj_HashTupleSlot);
+	ExecClearTuple(node->hj_InnerHashTupleSlot); // Changed
+	ExecClearTuple(node->hj_OuterHashTupleSlot); // Added
 
 	/*
 	 * clean up subtrees
@@ -929,6 +978,7 @@ ExecEndHashJoin(HashJoinState *node)
  * On success, the tuple's hash value is stored at *hashvalue --- this is
  * either originally computed, or re-read from the temp file.
  */
+// TODO: Does this need to be updated or is our hashjoin parralel aware? - Josh
 static TupleTableSlot *
 ExecHashJoinOuterGetTuple(PlanState *outerNode,
 						  HashJoinState *hjstate,
