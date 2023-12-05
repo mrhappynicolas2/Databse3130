@@ -2025,9 +2025,35 @@ ExecScanHashBucket(HashJoinState *hjstate,
 				   ExprContext *econtext)
 {
 	ExprState  *hjclauses = hjstate->hashclauses;
-	HashJoinTable hashtable = hjstate->hj_HashTable;
-	HashJoinTuple hashTuple = hjstate->hj_CurTuple;
-	uint32		hashvalue = hjstate->hj_CurHashValue;
+
+	// Removed the inital values here since they are added below - Josh
+	HashJoinTable hashtable;
+	HashJoinTuple hashTuple;
+	uint32 hashvalue;
+
+	// Added these two ints based on the sample implementation - Josh
+	int bucketNo;
+	TupleTableSlot hashTupSlot;
+
+	int skewBucketNo; // Added to work with 16.1 files
+
+	// Added this if else statement based on the sample implementation - Josh
+	if (hjstate->InnerProbing) {
+		hashtable = hjstate->hj_InnerHashTable;
+		hashTuple = hjstate->hj_InnerCurTuple;
+		hashvalue = hjstate->hj_InnerCurHashValue;
+		bucketNo = hjstate->hj_InnerCurBucketNo;
+		hashTupSlot = hjstate->hj_InnerHashTupleSlot;
+		skewBucketNo = hjstate->hj_InnerCurBucketNo;
+	}
+	else {
+		hashtable = hjstate->hj_OuterHashTable;
+		hashTuple = hjstate->hj_OuterCurTuple;
+		hashvalue = hjstate->hj_OuterCurHashValue;
+		bucketNo = hjstate->hj_OuterCurBucketNo;
+		hashTupSlot = hjstate->hj_OuterHashTupleSlot;
+		skewBucketNo = hjstate->hj_OuterCurBucketNo;
+	}
 
 	/*
 	 * hj_CurTuple is the address of the tuple last returned from the current
@@ -2039,9 +2065,9 @@ ExecScanHashBucket(HashJoinState *hjstate,
 	if (hashTuple != NULL)
 		hashTuple = hashTuple->next.unshared;
 	else if (hjstate->hj_CurSkewBucketNo != INVALID_SKEW_BUCKET_NO)
-		hashTuple = hashtable->skewBucket[hjstate->hj_CurSkewBucketNo]->tuples;
+		hashTuple = hashtable->skewBucket[skewBucketNo]->tuples; // Changed to include skewBucketNo - Josh
 	else
-		hashTuple = hashtable->buckets.unshared[hjstate->hj_CurBucketNo];
+		hashTuple = hashtable->buckets.unshared[bucketNo]; // Changed to inclde bucketNo - Josh
 
 	while (hashTuple != NULL)
 	{
@@ -2051,13 +2077,19 @@ ExecScanHashBucket(HashJoinState *hjstate,
 
 			/* insert hashtable's tuple into exec slot so ExecQual sees it */
 			inntuple = ExecStoreMinimalTuple(HJTUPLE_MINTUPLE(hashTuple),
-											 hjstate->hj_HashTupleSlot,
+											 hashTupSlot, // Changed - Josh
 											 false);	/* do not pfree */
 			econtext->ecxt_innertuple = inntuple;
 
 			if (ExecQualAndReset(hjclauses, econtext))
 			{
-				hjstate->hj_CurTuple = hashTuple;
+				// added this if statement to account for Inner/Outer - Josh
+				if (hjstate->InnerProbing) { 
+					hjstate->hj_InnerCurTuple = hashTuple;
+				}
+				else {
+					hjstate->hj_OuterCurTuple = hashTuple;
+				}
 				return true;
 			}
 		}
