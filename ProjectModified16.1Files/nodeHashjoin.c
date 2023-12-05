@@ -221,7 +221,8 @@ static pg_attribute_always_inline TupleTableSlot *
 ExecHashJoinImpl(PlanState *pstate, bool parallel)
 {
 	HashJoinState *node = castNode(HashJoinState, pstate);
-	
+	PlanState* outerNode;
+
 	//HashState  *hashNode; //removed by nicolas 
 	ExprState  *joinqual;
 	ExprState  *otherqual;
@@ -239,7 +240,7 @@ ExecHashJoinImpl(PlanState *pstate, bool parallel)
 	// These vars were changed to have inner/outer version, changed them back to one to make modifying the code easier - Josh
 	// if statement below is how they differentiate between inner/outer
 	HashState* hashNode;
-	HashJoinTable hashTable; 
+	HashJoinTable hashtable; 
 
 	/*
 	 * get information from HashJoin node
@@ -251,11 +252,11 @@ ExecHashJoinImpl(PlanState *pstate, bool parallel)
 	 * get information from HashJoin state
 	 */
 	if (node->hj_InnerProbing) { // Added by Josh
-		hashTable = node->hj_InnerHashTable;
+		hashtable = node->hj_InnerHashTable;
 		hashNode = (HashState*)innerPlanState(node);
 	}
 	else {
-		hashTable = node->hj_OuterHashTable;
+		hashtable = node->hj_OuterHashTable;
 		hashNode = (HashState*)outerPlanState(node);
 	}
 	
@@ -360,7 +361,7 @@ ExecHashJoinImpl(PlanState *pstate, bool parallel)
 					node->hj_InnerHashTable = hashtable;
 				}
 				else {
-					node->hj_HashTable = hashtable;
+					node->hj_OuterHashTable = hashtable;
 				}
 				
 
@@ -594,8 +595,15 @@ ExecHashJoinImpl(PlanState *pstate, bool parallel)
 					 * This is really only needed if HJ_FILL_INNER(node), but
 					 * we'll avoid the branch and just set it always.
 					 */
-					if (!HeapTupleHeaderHasMatch(HJTUPLE_MINTUPLE(node->hj_CurTuple)))
-						HeapTupleHeaderSetMatch(HJTUPLE_MINTUPLE(node->hj_CurTuple));
+					if (node->hj_InnerProbing) { // Updated - Josh
+						if (!HeapTupleHeaderHasMatch(HJTUPLE_MINTUPLE(node->hj_InnerCurTuple)))
+							HeapTupleHeaderSetMatch(HJTUPLE_MINTUPLE(node->hj_InnerCurTuple));
+					}
+					else {
+						if (!HeapTupleHeaderHasMatch(HJTUPLE_MINTUPLE(node->hj_OuterCurTuple)))
+							HeapTupleHeaderSetMatch(HJTUPLE_MINTUPLE(node->hj_OuterCurTuple));
+					}
+					
 
 					/* In an antijoin, we never return a matched tuple */
 					if (node->js.jointype == JOIN_ANTI)
@@ -855,7 +863,12 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 		HashState  *hashstate = (HashState *) innerPlanState(hjstate);
 		TupleTableSlot *slot = hashstate->ps.ps_ResultTupleSlot;
 
-		hjstate->hj_HashTupleSlot = slot;
+		if (hjstate->hj_InnerProbing) { // Added - Josh
+			hjstate->hj_InnerHashTupleSlot = slot;
+		}
+		else {
+			hjstate->hj_OuterHashTupleSlot = slot;
+		}
 	}
 
 	 /*
@@ -1588,110 +1601,111 @@ ExecEndHashJoin(HashJoinState *node)
 //}
 
 // TODO: Either remove this code or update it for inner/outer, not really sure what its used for - Josh
-static void
-ExecParallelHashJoinPartitionOuter(HashJoinState *hjstate)
-{
-	PlanState  *outerState = outerPlanState(hjstate);
-	ExprContext *econtext = hjstate->js.ps.ps_ExprContext;
-	HashJoinTable hashtable = hjstate->hj_HashTable;
-	TupleTableSlot *slot;
-	uint32		hashvalue;
-	int			i;
-
-	Assert(hjstate->hj_FirstOuterTupleSlot == NULL);
-
-	/* Execute outer plan, writing all tuples to shared tuplestores. */
-	for (;;)
-	{
-		slot = ExecProcNode(outerState);
-		if (TupIsNull(slot))
-			break;
-		econtext->ecxt_outertuple = slot;
-		if (ExecHashGetHashValue(hashtable, econtext,
-								 hjstate->hj_OuterHashKeys,
-								 true,	/* outer tuple */
-								 HJ_FILL_OUTER(hjstate),
-								 &hashvalue))
-		{
-			int			batchno;
-			int			bucketno;
-			bool		shouldFree;
-			MinimalTuple mintup = ExecFetchSlotMinimalTuple(slot, &shouldFree);
-
-			ExecHashGetBucketAndBatch(hashtable, hashvalue, &bucketno,
-									  &batchno);
-			sts_puttuple(hashtable->batches[batchno].outer_tuples,
-						 &hashvalue, mintup);
-
-			if (shouldFree)
-				heap_free_minimal_tuple(mintup);
-		}
-		CHECK_FOR_INTERRUPTS();
-	}
-
-	/* Make sure all outer partitions are readable by any backend. */
-	for (i = 0; i < hashtable->nbatch; ++i)
-		sts_end_write(hashtable->batches[i].outer_tuples);
-}
-
-void
-ExecHashJoinEstimate(HashJoinState *state, ParallelContext *pcxt)
-{
-	shm_toc_estimate_chunk(&pcxt->estimator, sizeof(ParallelHashJoinState));
-	shm_toc_estimate_keys(&pcxt->estimator, 1);
-}
-
-void
-ExecHashJoinInitializeDSM(HashJoinState *state, ParallelContext *pcxt)
-{
-	int			plan_node_id = state->js.ps.plan->plan_node_id;
-	HashState  *hashNode;
-	ParallelHashJoinState *pstate;
-
-	/*
-	 * Disable shared hash table mode if we failed to create a real DSM
-	 * segment, because that means that we don't have a DSA area to work with.
-	 */
-	if (pcxt->seg == NULL)
-		return;
-
-	ExecSetExecProcNode(&state->js.ps, ExecParallelHashJoin);
-
-	/*
-	 * Set up the state needed to coordinate access to the shared hash
-	 * table(s), using the plan node ID as the toc key.
-	 */
-	pstate = shm_toc_allocate(pcxt->toc, sizeof(ParallelHashJoinState));
-	shm_toc_insert(pcxt->toc, plan_node_id, pstate);
-
-	/*
-	 * Set up the shared hash join state with no batches initially.
-	 * ExecHashTableCreate() will prepare at least one later and set nbatch
-	 * and space_allowed.
-	 */
-	pstate->nbatch = 0;
-	pstate->space_allowed = 0;
-	pstate->batches = InvalidDsaPointer;
-	pstate->old_batches = InvalidDsaPointer;
-	pstate->nbuckets = 0;
-	pstate->growth = PHJ_GROWTH_OK;
-	pstate->chunk_work_queue = InvalidDsaPointer;
-	pg_atomic_init_u32(&pstate->distributor, 0);
-	pstate->nparticipants = pcxt->nworkers + 1;
-	pstate->total_tuples = 0;
-	LWLockInitialize(&pstate->lock,
-					 LWTRANCHE_PARALLEL_HASH_JOIN);
-	BarrierInit(&pstate->build_barrier, 0);
-	BarrierInit(&pstate->grow_batches_barrier, 0);
-	BarrierInit(&pstate->grow_buckets_barrier, 0);
-
-	/* Set up the space we'll use for shared temporary files. */
-	SharedFileSetInit(&pstate->fileset, pcxt->seg);
-
-	/* Initialize the shared state in the hash node. */
-	hashNode = (HashState *) innerPlanState(state);
-	hashNode->parallel_state = pstate;
-}
+// Commented out for now
+//static void
+//ExecParallelHashJoinPartitionOuter(HashJoinState *hjstate)
+//{
+//	PlanState  *outerState = outerPlanState(hjstate);
+//	ExprContext *econtext = hjstate->js.ps.ps_ExprContext;
+//	HashJoinTable hashtable = hjstate->hj_HashTable;
+//	TupleTableSlot *slot;
+//	uint32		hashvalue;
+//	int			i;
+//
+//	Assert(hjstate->hj_FirstOuterTupleSlot == NULL);
+//
+//	/* Execute outer plan, writing all tuples to shared tuplestores. */
+//	for (;;)
+//	{
+//		slot = ExecProcNode(outerState);
+//		if (TupIsNull(slot))
+//			break;
+//		econtext->ecxt_outertuple = slot;
+//		if (ExecHashGetHashValue(hashtable, econtext,
+//								 hjstate->hj_OuterHashKeys,
+//								 true,	/* outer tuple */
+//								 HJ_FILL_OUTER(hjstate),
+//								 &hashvalue))
+//		{
+//			int			batchno;
+//			int			bucketno;
+//			bool		shouldFree;
+//			MinimalTuple mintup = ExecFetchSlotMinimalTuple(slot, &shouldFree);
+//
+//			ExecHashGetBucketAndBatch(hashtable, hashvalue, &bucketno,
+//									  &batchno);
+//			sts_puttuple(hashtable->batches[batchno].outer_tuples,
+//						 &hashvalue, mintup);
+//
+//			if (shouldFree)
+//				heap_free_minimal_tuple(mintup);
+//		}
+//		CHECK_FOR_INTERRUPTS();
+//	}
+//
+//	/* Make sure all outer partitions are readable by any backend. */
+//	for (i = 0; i < hashtable->nbatch; ++i)
+//		sts_end_write(hashtable->batches[i].outer_tuples);
+//}
+//
+//void
+//ExecHashJoinEstimate(HashJoinState *state, ParallelContext *pcxt)
+//{
+//	shm_toc_estimate_chunk(&pcxt->estimator, sizeof(ParallelHashJoinState));
+//	shm_toc_estimate_keys(&pcxt->estimator, 1);
+//}
+//
+//void
+//ExecHashJoinInitializeDSM(HashJoinState *state, ParallelContext *pcxt)
+//{
+//	int			plan_node_id = state->js.ps.plan->plan_node_id;
+//	HashState  *hashNode;
+//	ParallelHashJoinState *pstate;
+//
+//	/*
+//	 * Disable shared hash table mode if we failed to create a real DSM
+//	 * segment, because that means that we don't have a DSA area to work with.
+//	 */
+//	if (pcxt->seg == NULL)
+//		return;
+//
+//	ExecSetExecProcNode(&state->js.ps, ExecParallelHashJoin);
+//
+//	/*
+//	 * Set up the state needed to coordinate access to the shared hash
+//	 * table(s), using the plan node ID as the toc key.
+//	 */
+//	pstate = shm_toc_allocate(pcxt->toc, sizeof(ParallelHashJoinState));
+//	shm_toc_insert(pcxt->toc, plan_node_id, pstate);
+//
+//	/*
+//	 * Set up the shared hash join state with no batches initially.
+//	 * ExecHashTableCreate() will prepare at least one later and set nbatch
+//	 * and space_allowed.
+//	 */
+//	pstate->nbatch = 0;
+//	pstate->space_allowed = 0;
+//	pstate->batches = InvalidDsaPointer;
+//	pstate->old_batches = InvalidDsaPointer;
+//	pstate->nbuckets = 0;
+//	pstate->growth = PHJ_GROWTH_OK;
+//	pstate->chunk_work_queue = InvalidDsaPointer;
+//	pg_atomic_init_u32(&pstate->distributor, 0);
+//	pstate->nparticipants = pcxt->nworkers + 1;
+//	pstate->total_tuples = 0;
+//	LWLockInitialize(&pstate->lock,
+//					 LWTRANCHE_PARALLEL_HASH_JOIN);
+//	BarrierInit(&pstate->build_barrier, 0);
+//	BarrierInit(&pstate->grow_batches_barrier, 0);
+//	BarrierInit(&pstate->grow_buckets_barrier, 0);
+//
+//	/* Set up the space we'll use for shared temporary files. */
+//	SharedFileSetInit(&pstate->fileset, pcxt->seg);
+//
+//	/* Initialize the shared state in the hash node. */
+//	hashNode = (HashState *) innerPlanState(state);
+//	hashNode->parallel_state = pstate;
+//}
 
 /* ----------------------------------------------------------------
  *		ExecHashJoinReInitializeDSM

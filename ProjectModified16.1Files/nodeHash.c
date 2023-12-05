@@ -89,7 +89,7 @@ static void ExecParallelHashCloseBatchAccessors(HashJoinTable hashtable);
  * ----------------------------------------------------------------
  */
 static TupleTableSlot *
-ExecHash(PlanState *pstate)
+ExecHash(HashState* node)
 {
 		// CSI3530 CREER LES VARIABLES POUR LE PLAN , HASHJOINTABLE ET..
 	// CSI3530 OBTENEZ L'ETAT DU OUTER NODE
@@ -2033,12 +2033,12 @@ ExecScanHashBucket(HashJoinState *hjstate,
 
 	// Added these two ints based on the sample implementation - Josh
 	int bucketNo;
-	TupleTableSlot hashTupSlot;
+	TupleTableSlot *hashTupSlot;
 
 	int skewBucketNo; // Added to work with 16.1 files
 
 	// Added this if else statement based on the sample implementation - Josh
-	if (hjstate->InnerProbing) {
+	if (hjstate->hj_InnerProbing) {
 		hashtable = hjstate->hj_InnerHashTable;
 		hashTuple = hjstate->hj_InnerCurTuple;
 		hashvalue = hjstate->hj_InnerCurHashValue;
@@ -2064,7 +2064,7 @@ ExecScanHashBucket(HashJoinState *hjstate,
 	 */
 	if (hashTuple != NULL)
 		hashTuple = hashTuple->next.unshared;
-	else if (hjstate->hj_CurSkewBucketNo != INVALID_SKEW_BUCKET_NO)
+	else if (skewBucketNo != INVALID_SKEW_BUCKET_NO) // Changed to include skewBucketNo - Josh
 		hashTuple = hashtable->skewBucket[skewBucketNo]->tuples; // Changed to include skewBucketNo - Josh
 	else
 		hashTuple = hashtable->buckets.unshared[bucketNo]; // Changed to inclde bucketNo - Josh
@@ -2084,7 +2084,7 @@ ExecScanHashBucket(HashJoinState *hjstate,
 			if (ExecQualAndReset(hjclauses, econtext))
 			{
 				// added this if statement to account for Inner/Outer - Josh
-				if (hjstate->InnerProbing) { 
+				if (hjstate->hj_InnerProbing) { 
 					hjstate->hj_InnerCurTuple = hashTuple;
 				}
 				else {
@@ -2118,9 +2118,28 @@ ExecParallelScanHashBucket(HashJoinState *hjstate,
 						   ExprContext *econtext)
 {
 	ExprState  *hjclauses = hjstate->hashclauses;
-	HashJoinTable hashtable = hjstate->hj_HashTable;
-	HashJoinTuple hashTuple = hjstate->hj_CurTuple;
-	uint32		hashvalue = hjstate->hj_CurHashValue;
+
+	// Updated for inner/outer probing - Josh
+	HashJoinTable hashtable;
+	HashJoinTuple hashTuple;
+	uint32		  hashvalue;
+	int			  bucketNo;
+	TupleTableSlot* tupTableSlot;
+
+	if (hjstate->hj_InnerProbing) {
+		hashtable = hjstate->hj_InnerHashTable;
+		hashTuple = hjstate->hj_InnerCurTuple;
+		hashvalue = hjstate->hj_InnerCurHashValue;
+		bucketNo = hjstate->hj_InnerCurBucketNo;
+		tupTableSlot = hjstate->hj_InnerHashTupleSlot;
+	}
+	else {
+		hashtable = hjstate->hj_OuterHashTable;
+		hashTuple = hjstate->hj_OuterCurTuple;
+		hashvalue = hjstate->hj_OuterCurHashValue;
+		bucketNo = hjstate->hj_OuterCurBucketNo;
+		tupTableSlot = hjstate->hj_OuterHashTupleSlot;
+	}
 
 	/*
 	 * hj_CurTuple is the address of the tuple last returned from the current
@@ -2130,7 +2149,7 @@ ExecParallelScanHashBucket(HashJoinState *hjstate,
 		hashTuple = ExecParallelHashNextTuple(hashtable, hashTuple);
 	else
 		hashTuple = ExecParallelHashFirstTuple(hashtable,
-											   hjstate->hj_CurBucketNo);
+											   bucketNo);
 
 	while (hashTuple != NULL)
 	{
@@ -2140,13 +2159,19 @@ ExecParallelScanHashBucket(HashJoinState *hjstate,
 
 			/* insert hashtable's tuple into exec slot so ExecQual sees it */
 			inntuple = ExecStoreMinimalTuple(HJTUPLE_MINTUPLE(hashTuple),
-											 hjstate->hj_HashTupleSlot,
+											 tupTableSlot,
 											 false);	/* do not pfree */
 			econtext->ecxt_innertuple = inntuple;
 
 			if (ExecQualAndReset(hjclauses, econtext))
 			{
-				hjstate->hj_CurTuple = hashTuple;
+				if (hjstate->hj_InnerProbing) { // Updated - Josh
+					hjstate->hj_InnerCurTuple = hashTuple;
+				}
+				else {
+					hjstate->hj_OuterCurTuple = hashTuple;
+				}
+				
 				return true;
 			}
 		}
@@ -2175,9 +2200,16 @@ ExecPrepHashTableForUnmatched(HashJoinState *hjstate)
 	 * hj_CurTuple: last tuple returned, or NULL to start next bucket
 	 *----------
 	 */
-	hjstate->hj_CurBucketNo = 0;
-	hjstate->hj_CurSkewBucketNo = 0;
-	hjstate->hj_CurTuple = NULL;
+	if (hjstate->hj_InnerProbing) { // added - Josh
+		hjstate->hj_InnerCurBucketNo = 0;
+		hjstate->hj_InnerCurSkewBucketNo = 0;
+		hjstate->hj_InnerCurTuple = NULL;
+	}
+	else {
+		hjstate->hj_OuterCurBucketNo = 0;
+		hjstate->hj_OuterCurSkewBucketNo = 0;
+		hjstate->hj_OuterCurTuple = NULL;
+	}
 }
 
 /*
@@ -2188,7 +2220,15 @@ ExecPrepHashTableForUnmatched(HashJoinState *hjstate)
 bool
 ExecParallelPrepHashTableForUnmatched(HashJoinState *hjstate)
 {
-	HashJoinTable hashtable = hjstate->hj_HashTable;
+	// Updated below - Josh
+	HashJoinTable hashtable;
+	if (hjstate->hj_InnerProbing) {
+		hashtable = hjstate->hj_InnerHashTable;
+	}
+	else {
+		hashtable = hjstate->hj_OuterHashTable;
+	}
+
 	int			curbatch = hashtable->curbatch;
 	ParallelHashJoinBatch *batch = hashtable->batches[curbatch].shared;
 
@@ -2253,8 +2293,27 @@ ExecParallelPrepHashTableForUnmatched(HashJoinState *hjstate)
 bool
 ExecScanHashTableForUnmatched(HashJoinState *hjstate, ExprContext *econtext)
 {
-	HashJoinTable hashtable = hjstate->hj_HashTable;
-	HashJoinTuple hashTuple = hjstate->hj_CurTuple;
+	// Updated this initialization - Josh
+	HashJoinTable hashtable;
+	HashJoinTuple hashTuple;
+	TupleTableSlot* hashTupSlot;
+	int bucketNo;
+	int skewBucketNo;
+
+	if (hjstate->hj_InnerProbing) {
+		hashtable = hjstate->hj_InnerHashTable;
+		hashTuple = hjstate->hj_InnerCurTuple;
+		hashTupSlot = hjstate->hj_InnerHashTupleSlot;
+		bucketNo = hjstate->hj_InnerCurBucketNo;
+		skewBucketNo = hjstate->hj_InnerCurSkewBucketNo;
+	}
+	else {
+		hashtable = hjstate->hj_OuterHashTable;
+		hashTuple = hjstate->hj_OuterCurTuple;
+		hashTupSlot = hjstate->hj_OuterHashTupleSlot;
+		bucketNo = hjstate->hj_OuterCurBucketNo;
+		skewBucketNo = hjstate->hj_OuterCurSkewBucketNo;
+	}
 
 	for (;;)
 	{
@@ -2265,17 +2324,29 @@ ExecScanHashTableForUnmatched(HashJoinState *hjstate, ExprContext *econtext)
 		 */
 		if (hashTuple != NULL)
 			hashTuple = hashTuple->next.unshared;
-		else if (hjstate->hj_CurBucketNo < hashtable->nbuckets)
+		else if (bucketNo < hashtable->nbuckets) // Updated to include bucketNo - Josh
 		{
-			hashTuple = hashtable->buckets.unshared[hjstate->hj_CurBucketNo];
-			hjstate->hj_CurBucketNo++;
+			hashTuple = hashtable->buckets.unshared[bucketNo]; // Updated to include bucketNo - Josh
+			if (hjstate->hj_InnerProbing) { // Updated - Josh
+				hjstate->hj_InnerCurBucketNo++;
+			}
+			else {
+				hjstate->hj_OuterCurBucketNo++;
+			}
 		}
-		else if (hjstate->hj_CurSkewBucketNo < hashtable->nSkewBuckets)
+		else if (skewBucketNo < hashtable->nSkewBuckets)
 		{
-			int			j = hashtable->skewBucketNums[hjstate->hj_CurSkewBucketNo];
+			int			j = hashtable->skewBucketNums[skewBucketNo];
 
 			hashTuple = hashtable->skewBucket[j]->tuples;
-			hjstate->hj_CurSkewBucketNo++;
+
+			if (hjstate->hj_InnerProbing) { // Updated - Josh
+				hjstate->hj_InnerCurSkewBucketNo++;
+			}
+			else {
+				hjstate->hj_OuterCurSkewBucketNo++;
+			}
+			
 		}
 		else
 			break;				/* finished all buckets */
@@ -2288,7 +2359,7 @@ ExecScanHashTableForUnmatched(HashJoinState *hjstate, ExprContext *econtext)
 
 				/* insert hashtable's tuple into exec slot */
 				inntuple = ExecStoreMinimalTuple(HJTUPLE_MINTUPLE(hashTuple),
-												 hjstate->hj_HashTupleSlot,
+												 hashTupSlot, /* Updated - Josh*/
 												 false);	/* do not pfree */
 				econtext->ecxt_innertuple = inntuple;
 
@@ -2299,7 +2370,12 @@ ExecScanHashTableForUnmatched(HashJoinState *hjstate, ExprContext *econtext)
 				 */
 				ResetExprContext(econtext);
 
-				hjstate->hj_CurTuple = hashTuple;
+				if (hjstate->hj_InnerProbing) {
+					hjstate->hj_InnerCurTuple = hashTuple;
+				}
+				else {
+					hjstate->hj_OuterCurTuple = hashTuple;
+				}
 				return true;
 			}
 
@@ -2328,8 +2404,23 @@ bool
 ExecParallelScanHashTableForUnmatched(HashJoinState *hjstate,
 									  ExprContext *econtext)
 {
-	HashJoinTable hashtable = hjstate->hj_HashTable;
-	HashJoinTuple hashTuple = hjstate->hj_CurTuple;
+	//Updated initialization - Josh
+	HashJoinTable hashtable;
+	HashJoinTuple hashTuple;
+	TupleTableSlot *hashTupSlot;
+	int bucketNo;
+	if (hjstate->hj_InnerProbing) {
+		hashtable = hjstate->hj_InnerHashTable;
+		hashTuple = hjstate->hj_InnerCurTuple;
+		bucketNo = hjstate->hj_InnerCurBucketNo;
+		hashTupSlot = hjstate->hj_InnerHashTupleSlot;
+	}
+	else {
+		hashtable = hjstate->hj_OuterHashTable;
+		hashTuple = hjstate->hj_OuterCurTuple;
+		bucketNo = hjstate->hj_OuterCurBucketNo;
+		hashTupSlot = hjstate->hj_OuterHashTupleSlot;
+	}
 
 	for (;;)
 	{
@@ -2340,9 +2431,9 @@ ExecParallelScanHashTableForUnmatched(HashJoinState *hjstate,
 		 */
 		if (hashTuple != NULL)
 			hashTuple = ExecParallelHashNextTuple(hashtable, hashTuple);
-		else if (hjstate->hj_CurBucketNo < hashtable->nbuckets)
+		else if (bucketNo < hashtable->nbuckets) // Updated - Josh
 			hashTuple = ExecParallelHashFirstTuple(hashtable,
-												   hjstate->hj_CurBucketNo++);
+												   bucketNo++);
 		else
 			break;				/* finished all buckets */
 
@@ -2354,7 +2445,7 @@ ExecParallelScanHashTableForUnmatched(HashJoinState *hjstate,
 
 				/* insert hashtable's tuple into exec slot */
 				inntuple = ExecStoreMinimalTuple(HJTUPLE_MINTUPLE(hashTuple),
-												 hjstate->hj_HashTupleSlot,
+												 hashTupSlot,
 												 false);	/* do not pfree */
 				econtext->ecxt_innertuple = inntuple;
 
@@ -2365,7 +2456,12 @@ ExecParallelScanHashTableForUnmatched(HashJoinState *hjstate,
 				 */
 				ResetExprContext(econtext);
 
-				hjstate->hj_CurTuple = hashTuple;
+				if (hjstate->hj_InnerProbing) {
+					hjstate->hj_InnerCurTuple = hashTuple;
+				}
+				else {
+					hjstate->hj_OuterCurTuple = hashTuple;
+				}
 				return true;
 			}
 

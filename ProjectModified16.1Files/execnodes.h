@@ -2112,7 +2112,7 @@ typedef struct HashJoinState
 	JoinState	js;				/* its first field is NodeTag */
 	ExprState  *hashclauses;
 	List	   *hj_OuterHashKeys;	/* list of ExprState nodes */
-	List	   *hj_OuterHashKeys;	// Added (this wasnt here before, isn't there supposed to be different outer keys?) - Josh
+	List	   *hj_InnerHashKeys;	// Added (this wasnt here before, isn't there supposed to be different outer keys?) - Josh
 	List	   *hj_HashOperators;	/* list of operator OIDs */
 	List	   *hj_Collations;
 	HashJoinTable hj_OuterHashTable; //Changed
@@ -2130,6 +2130,7 @@ typedef struct HashJoinState
 	TupleTableSlot *hj_OuterHashTupleSlot; // Changed
 	TupleTableSlot *hj_InnerHashTupleSlot; // Added
 	TupleTableSlot *hj_NullInnerTupleSlot;
+	TupleTableSlot *hj_NullOuterTupleSlot; // Added
 	TupleTableSlot *hj_FirstOuterTupleSlot;
 	TupleTableSlot *hj_FirstInnerTupleSlot; // Added
 	int			hj_JoinState;
