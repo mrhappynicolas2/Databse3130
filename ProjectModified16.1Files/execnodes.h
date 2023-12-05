@@ -2120,6 +2120,8 @@ typedef struct HashJoinState
 	uint32		hj_InnerCurHashValue; // Added
 	int			hj_OuterCurBucketNo; // Changed
 	int			hj_InnerCurBucketNo; // Added
+	int			hj_InnerCurSkewBucketNo; // Changed
+	int			hj_OuterCurSkewBucketNo; // Added
 	HashJoinTuple hj_OuterCurTuple; // Changed
 	HashJoinTuple hj_InnerCurTuple; // Added
 	TupleTableSlot *hj_OuterTupleSlot;
