@@ -2404,7 +2404,7 @@ bool
 ExecParallelScanHashTableForUnmatched(HashJoinState *hjstate,
 									  ExprContext *econtext)
 {
-	//Updated initialization - Josh
+	//Updated initialization - Josh 
 	HashJoinTable hashtable;
 	HashJoinTuple hashTuple;
 	TupleTableSlot *hashTupSlot;

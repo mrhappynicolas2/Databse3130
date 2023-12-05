@@ -863,7 +863,7 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 		HashState  *hashstate = (HashState *) innerPlanState(hjstate);
 		TupleTableSlot *slot = hashstate->ps.ps_ResultTupleSlot;
 
-		if (hjstate->hj_InnerProbing) { // Added - Josh
+		if (hjstate->hj_InnerProbing) { // Added - Josh 
 			hjstate->hj_InnerHashTupleSlot = slot;
 		}
 		else {
