@@ -134,7 +134,9 @@ ExecHash(HashState* node)
 		hashtable->totalTuples += 1;
 		/* We have to compute the hash value */
 		econtext->ecxt_innertuple = slot;
-		hashvalue = ExecHashGetHashValue(hashtable, econtext, hashkeys);
+		hashvalue = ExecHashGetHashValue(hashtable, econtext, hashkeys,
+										 false, hashtable->keepNulls,
+										 &hashvalue); //changed from 3 variables to 5 variables (followed template) - Nicolas
 		ExecHashTableInsert(hashtable, ExecFetchSlotTuple(slot), hashvalue);
 	}
 
