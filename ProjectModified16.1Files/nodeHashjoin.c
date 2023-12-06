@@ -199,8 +199,8 @@ static TupleTableSlot *ExecHashJoinGetSavedTuple(HashJoinState *hjstate,
 												 BufFile *file,
 												 uint32 *hashvalue,
 												 TupleTableSlot *tupleSlot);
-static bool ExecHashJoinNewBatch(HashJoinState *hjstate);
-static bool ExecParallelHashJoinNewBatch(HashJoinState *hjstate);
+//static bool ExecHashJoinNewBatch(HashJoinState *hjstate);
+//static bool ExecParallelHashJoinNewBatch(HashJoinState *hjstate);
 static void ExecParallelHashJoinPartitionOuter(HashJoinState *hjstate);
 
 
@@ -991,141 +991,157 @@ ExecEndHashJoin(HashJoinState *node)
  * On success, the tuple's hash value is stored at *hashvalue --- this is
  * either originally computed, or re-read from the temp file.
  */
-// Removed since no batches - Josh
-//static TupleTableSlot *
-//ExecHashJoinOuterGetTuple(PlanState *outerNode,
-//						  HashJoinState *hjstate,
-//						  uint32 *hashvalue)
-//{
-//	HashJoinTable hashtable = hjstate->hj_HashTable;
-//	int			curbatch = hashtable->curbatch;
-//	TupleTableSlot *slot;
-//
-//	if (curbatch == 0)			/* if it is the first pass */
-//	{
-//		/*
-//		 * Check to see if first outer tuple was already fetched by
-//		 * ExecHashJoin() and not used yet.
-//		 */
-//		slot = hjstate->hj_FirstOuterTupleSlot;
-//		if (!TupIsNull(slot))
-//			hjstate->hj_FirstOuterTupleSlot = NULL;
-//		else
-//			slot = ExecProcNode(outerNode);
-//
-//		while (!TupIsNull(slot))
-//		{
-//			/*
-//			 * We have to compute the tuple's hash value.
-//			 */
-//			ExprContext *econtext = hjstate->js.ps.ps_ExprContext;
-//
-//			econtext->ecxt_outertuple = slot;
-//			if (ExecHashGetHashValue(hashtable, econtext,
-//									 hjstate->hj_OuterHashKeys,
-//									 true,	/* outer tuple */
-//									 HJ_FILL_OUTER(hjstate),
-//									 hashvalue))
-//			{
-//				/* remember outer relation is not empty for possible rescan */
-//				hjstate->hj_OuterNotEmpty = true;
-//
-//				return slot;
-//			}
-//
-//			/*
-//			 * That tuple couldn't match because of a NULL, so discard it and
-//			 * continue with the next one.
-//			 */
-//			slot = ExecProcNode(outerNode);
-//		}
-//	}
-//	else if (curbatch < hashtable->nbatch)
-//	{
-//		BufFile    *file = hashtable->outerBatchFile[curbatch];
-//
-//		/*
-//		 * In outer-join cases, we could get here even though the batch file
-//		 * is empty.
-//		 */
-//		if (file == NULL)
-//			return NULL;
-//
-//		slot = ExecHashJoinGetSavedTuple(hjstate,
-//										 file,
-//										 hashvalue,
-//										 hjstate->hj_OuterTupleSlot);
-//		if (!TupIsNull(slot))
-//			return slot;
-//	}
-//
-//	/* End of this batch */
-//	return NULL;
-//}
+static TupleTableSlot *
+ExecHashJoinOuterGetTuple(PlanState *outerNode,
+						  HashJoinState *hjstate,
+						  uint32 *hashvalue)
+{
+	// TODO: update for symmetry
+	HashJoinTable hashtable;
+	int			curbatch = hashtable->curbatch;
+	TupleTableSlot *slot;
+
+	// Updated - Josh
+	if (hjstate->hj_InnerProbing) {
+		hashtable = hjstate->hj_InnerHashTable;
+	}
+	else {
+		hashtable = hjstate->hj_OuterHashTable;
+	}
+
+	if (curbatch == 0)			/* if it is the first pass */
+	{
+		/*
+		 * Check to see if first outer tuple was already fetched by
+		 * ExecHashJoin() and not used yet.
+		 */
+		slot = hjstate->hj_FirstOuterTupleSlot;
+		if (!TupIsNull(slot))
+			hjstate->hj_FirstOuterTupleSlot = NULL;
+		else
+			slot = ExecProcNode(outerNode);
+
+		while (!TupIsNull(slot))
+		{
+			/*
+			 * We have to compute the tuple's hash value.
+			 */
+			ExprContext *econtext = hjstate->js.ps.ps_ExprContext;
+
+			econtext->ecxt_outertuple = slot;
+			if (ExecHashGetHashValue(hashtable, econtext,
+									 hjstate->hj_OuterHashKeys,
+									 true,	/* outer tuple */
+									 HJ_FILL_OUTER(hjstate),
+									 hashvalue))
+			{
+				/* remember outer relation is not empty for possible rescan */
+				hjstate->hj_OuterNotEmpty = true;
+
+				return slot;
+			}
+
+			/*
+			 * That tuple couldn't match because of a NULL, so discard it and
+			 * continue with the next one.
+			 */
+			slot = ExecProcNode(outerNode);
+		}
+	}
+	else if (curbatch < hashtable->nbatch)
+	{
+		BufFile    *file = hashtable->outerBatchFile[curbatch];
+
+		/*
+		 * In outer-join cases, we could get here even though the batch file
+		 * is empty.
+		 */
+		if (file == NULL)
+			return NULL;
+
+		slot = ExecHashJoinGetSavedTuple(hjstate,
+										 file,
+										 hashvalue,
+										 hjstate->hj_OuterTupleSlot);
+		if (!TupIsNull(slot))
+			return slot;
+	}
+
+	/* End of this batch */
+	return NULL;
+}
 
 /*
  * ExecHashJoinOuterGetTuple variant for the parallel case.
  */
-//static TupleTableSlot * // Removed since no batches, but not %100 sure about this one since its supposed to be for parallel cases - Josh
-//ExecParallelHashJoinOuterGetTuple(PlanState *outerNode,
-//								  HashJoinState *hjstate,
-//								  uint32 *hashvalue)
-//{
-//	HashJoinTable hashtable = hjstate->hj_HashTable;
-//	int			curbatch = hashtable->curbatch;
-//	TupleTableSlot *slot;
-//
-//	/*
-//	 * In the Parallel Hash case we only run the outer plan directly for
-//	 * single-batch hash joins.  Otherwise we have to go to batch files, even
-//	 * for batch 0.
-//	 */
-//	if (curbatch == 0 && hashtable->nbatch == 1)
-//	{
-//		slot = ExecProcNode(outerNode);
-//
-//		while (!TupIsNull(slot))
-//		{
-//			ExprContext *econtext = hjstate->js.ps.ps_ExprContext;
-//
-//			econtext->ecxt_outertuple = slot;
-//			if (ExecHashGetHashValue(hashtable, econtext,
-//									 hjstate->hj_OuterHashKeys,
-//									 true,	/* outer tuple */
-//									 HJ_FILL_OUTER(hjstate),
-//									 hashvalue))
-//				return slot;
-//
-//			/*
-//			 * That tuple couldn't match because of a NULL, so discard it and
-//			 * continue with the next one.
-//			 */
-//			slot = ExecProcNode(outerNode);
-//		}
-//	}
-//	else if (curbatch < hashtable->nbatch)
-//	{
-//		MinimalTuple tuple;
-//
-//		tuple = sts_parallel_scan_next(hashtable->batches[curbatch].outer_tuples,
-//									   hashvalue);
-//		if (tuple != NULL)
-//		{
-//			ExecForceStoreMinimalTuple(tuple,
-//									   hjstate->hj_OuterTupleSlot,
-//									   false);
-//			slot = hjstate->hj_OuterTupleSlot;
-//			return slot;
-//		}
-//		else
-//			ExecClearTuple(hjstate->hj_OuterTupleSlot);
-//	}
-//
-//	/* End of this batch */
-//	hashtable->batches[curbatch].outer_eof = true;
-//
-//	return NULL;
-//}
+static TupleTableSlot *
+ExecParallelHashJoinOuterGetTuple(PlanState *outerNode,
+								  HashJoinState *hjstate,
+								  uint32 *hashvalue)
+{
+	//TODO: Fix things for symmetry
+	HashJoinTable hashtable;
+	int			curbatch = hashtable->curbatch;
+	TupleTableSlot *slot;
+
+	if (hjstate->hj_InnerProbing) {
+		hashtable = hjstate->hj_InnerHashTable;
+	}
+	else {
+		hashtable = hjstate->hj_OuterHashTable;
+	}
+
+	/*
+	 * In the Parallel Hash case we only run the outer plan directly for
+	 * single-batch hash joins.  Otherwise we have to go to batch files, even
+	 * for batch 0.
+	 */
+	if (curbatch == 0 && hashtable->nbatch == 1)
+	{
+		slot = ExecProcNode(outerNode);
+
+		while (!TupIsNull(slot))
+		{
+			ExprContext *econtext = hjstate->js.ps.ps_ExprContext;
+
+			econtext->ecxt_outertuple = slot;
+			if (ExecHashGetHashValue(hashtable, econtext,
+									 hjstate->hj_OuterHashKeys,
+									 true,	/* outer tuple */
+									 HJ_FILL_OUTER(hjstate),
+									 hashvalue))
+				return slot;
+
+			/*
+			 * That tuple couldn't match because of a NULL, so discard it and
+			 * continue with the next one.
+			 */
+			slot = ExecProcNode(outerNode);
+		}
+	}
+	else if (curbatch < hashtable->nbatch)
+	{
+		MinimalTuple tuple;
+
+		tuple = sts_parallel_scan_next(hashtable->batches[curbatch].outer_tuples,
+									   hashvalue);
+		if (tuple != NULL)
+		{
+			ExecForceStoreMinimalTuple(tuple,
+									   hjstate->hj_OuterTupleSlot,
+									   false);
+			slot = hjstate->hj_OuterTupleSlot;
+			return slot;
+		}
+		else
+			ExecClearTuple(hjstate->hj_OuterTupleSlot);
+	}
+
+	/* End of this batch */
+	hashtable->batches[curbatch].outer_eof = true;
+
+	return NULL;
+}
 
 /*
  * ExecHashJoinNewBatch
@@ -1458,43 +1474,43 @@ ExecEndHashJoin(HashJoinState *node)
  * On success, *hashvalue is set to the tuple's hash value, and the tuple
  * itself is stored in the given slot.
  */
-//static TupleTableSlot * // Removed since no batches? - Josh
-//ExecHashJoinGetSavedTuple(HashJoinState *hjstate,
-//						  BufFile *file,
-//						  uint32 *hashvalue,
-//						  TupleTableSlot *tupleSlot)
-//{
-//	uint32		header[2];
-//	size_t		nread;
-//	MinimalTuple tuple;
-//
-//	/*
-//	 * We check for interrupts here because this is typically taken as an
-//	 * alternative code path to an ExecProcNode() call, which would include
-//	 * such a check.
-//	 */
-//	CHECK_FOR_INTERRUPTS();
-//
-//	/*
-//	 * Since both the hash value and the MinimalTuple length word are uint32,
-//	 * we can read them both in one BufFileRead() call without any type
-//	 * cheating.
-//	 */
-//	nread = BufFileReadMaybeEOF(file, header, sizeof(header), true);
-//	if (nread == 0)				/* end of file */
-//	{
-//		ExecClearTuple(tupleSlot);
-//		return NULL;
-//	}
-//	*hashvalue = header[0];
-//	tuple = (MinimalTuple) palloc(header[1]);
-//	tuple->t_len = header[1];
-//	BufFileReadExact(file,
-//					 (char *) tuple + sizeof(uint32),
-//					 header[1] - sizeof(uint32));
-//	ExecForceStoreMinimalTuple(tuple, tupleSlot, true);
-//	return tupleSlot;
-//}
+static TupleTableSlot * 
+ExecHashJoinGetSavedTuple(HashJoinState *hjstate,
+						  BufFile *file,
+						  uint32 *hashvalue,
+						  TupleTableSlot *tupleSlot)
+{
+	uint32		header[2];
+	size_t		nread;
+	MinimalTuple tuple;
+
+	/*
+	 * We check for interrupts here because this is typically taken as an
+	 * alternative code path to an ExecProcNode() call, which would include
+	 * such a check.
+	 */
+	CHECK_FOR_INTERRUPTS();
+
+	/*
+	 * Since both the hash value and the MinimalTuple length word are uint32,
+	 * we can read them both in one BufFileRead() call without any type
+	 * cheating.
+	 */
+	nread = BufFileReadMaybeEOF(file, header, sizeof(header), true);
+	if (nread == 0)				/* end of file */
+	{
+		ExecClearTuple(tupleSlot);
+		return NULL;
+	}
+	*hashvalue = header[0];
+	tuple = (MinimalTuple) palloc(header[1]);
+	tuple->t_len = header[1];
+	BufFileReadExact(file,
+					 (char *) tuple + sizeof(uint32),
+					 header[1] - sizeof(uint32));
+	ExecForceStoreMinimalTuple(tuple, tupleSlot, true);
+	return tupleSlot;
+}
 
 
 //void // Removed since no batches? - Josh
@@ -1600,54 +1616,61 @@ ExecEndHashJoin(HashJoinState *node)
 //	}
 //}
 
-// TODO: Either remove this code or update it for inner/outer, not really sure what its used for - Josh
-// Commented out for now
-//static void
-//ExecParallelHashJoinPartitionOuter(HashJoinState *hjstate)
-//{
-//	PlanState  *outerState = outerPlanState(hjstate);
-//	ExprContext *econtext = hjstate->js.ps.ps_ExprContext;
-//	HashJoinTable hashtable = hjstate->hj_HashTable;
-//	TupleTableSlot *slot;
-//	uint32		hashvalue;
-//	int			i;
-//
-//	Assert(hjstate->hj_FirstOuterTupleSlot == NULL);
-//
-//	/* Execute outer plan, writing all tuples to shared tuplestores. */
-//	for (;;)
-//	{
-//		slot = ExecProcNode(outerState);
-//		if (TupIsNull(slot))
-//			break;
-//		econtext->ecxt_outertuple = slot;
-//		if (ExecHashGetHashValue(hashtable, econtext,
-//								 hjstate->hj_OuterHashKeys,
-//								 true,	/* outer tuple */
-//								 HJ_FILL_OUTER(hjstate),
-//								 &hashvalue))
-//		{
-//			int			batchno;
-//			int			bucketno;
-//			bool		shouldFree;
-//			MinimalTuple mintup = ExecFetchSlotMinimalTuple(slot, &shouldFree);
-//
-//			ExecHashGetBucketAndBatch(hashtable, hashvalue, &bucketno,
-//									  &batchno);
-//			sts_puttuple(hashtable->batches[batchno].outer_tuples,
-//						 &hashvalue, mintup);
-//
-//			if (shouldFree)
-//				heap_free_minimal_tuple(mintup);
-//		}
-//		CHECK_FOR_INTERRUPTS();
-//	}
-//
-//	/* Make sure all outer partitions are readable by any backend. */
-//	for (i = 0; i < hashtable->nbatch; ++i)
-//		sts_end_write(hashtable->batches[i].outer_tuples);
-//}
-//
+static void
+ExecParallelHashJoinPartitionOuter(HashJoinState *hjstate)
+{
+	PlanState  *outerState = outerPlanState(hjstate);
+	ExprContext *econtext = hjstate->js.ps.ps_ExprContext;
+	HashJoinTable hashtable;
+	TupleTableSlot *slot;
+	uint32		hashvalue;
+	int			i;
+
+	//TODO: Update this and other things in this function to reflect symmetry
+	Assert(hjstate->hj_FirstOuterTupleSlot == NULL);
+
+	//Updated - Josh
+	if (hjstate->hj_InnerProbing) {
+		hashtable = hjstate->hj_InnerHashTable;
+	}
+	else {
+		hashtable = hjstate->hj_OuterHashTable;
+	}
+
+	/* Execute outer plan, writing all tuples to shared tuplestores. */
+	for (;;)
+	{
+		slot = ExecProcNode(outerState);
+		if (TupIsNull(slot))
+			break;
+		econtext->ecxt_outertuple = slot;
+		if (ExecHashGetHashValue(hashtable, econtext,
+								 hjstate->hj_OuterHashKeys,
+								 true,	/* outer tuple */
+								 HJ_FILL_OUTER(hjstate),
+								 &hashvalue))
+		{
+			int			batchno;
+			int			bucketno;
+			bool		shouldFree;
+			MinimalTuple mintup = ExecFetchSlotMinimalTuple(slot, &shouldFree);
+
+			ExecHashGetBucketAndBatch(hashtable, hashvalue, &bucketno,
+									  &batchno);
+			sts_puttuple(hashtable->batches[batchno].outer_tuples,
+						 &hashvalue, mintup);
+
+			if (shouldFree)
+				heap_free_minimal_tuple(mintup);
+		}
+		CHECK_FOR_INTERRUPTS();
+	}
+
+	/* Make sure all outer partitions are readable by any backend. */
+	for (i = 0; i < hashtable->nbatch; ++i)
+		sts_end_write(hashtable->batches[i].outer_tuples);
+}
+
 //void
 //ExecHashJoinEstimate(HashJoinState *state, ParallelContext *pcxt)
 //{
