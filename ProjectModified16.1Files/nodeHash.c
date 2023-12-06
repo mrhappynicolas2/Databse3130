@@ -91,72 +91,8 @@ static void ExecParallelHashCloseBatchAccessors(HashJoinTable hashtable);
 static TupleTableSlot *
 ExecHash(HashState* node)
 {
-		// CSI3530 CREER LES VARIABLES POUR LE PLAN , HASHJOINTABLE ET..
-	// CSI3530 OBTENEZ L'ETAT DU OUTER NODE
-	// CSI3530 INITIALISEZ LE EXPRESSION CONTEXT
-	// CSI3530 COMPUTE HASH VALUE
-	//...
-	// CSI3130 For variables, plan, hash join table get the state of outer node
-	// CSI3130 Initialize the expression context and compute hash value
-	//TODO: start of copy paste from multi, might need to change somethings
-	PlanState  *outerNode;
-	List	   *hashkeys;
-	HashJoinTable hashtable;
-	TupleTableSlot *slot;
-	ExprContext *econtext;
-	uint32		hashvalue;
-
-	/* must provide our own instrumentation support */
-	if (node->ps.instrument)
-		InstrStartNode(node->ps.instrument);
-
-	/*
-	 * get state info from node
-	 */
-	outerNode = outerPlanState(node);
-	hashtable = node->hashtable;
-
-	/*
-	 * set expression context
-	 */
-	hashkeys = node->hashkeys;
-	econtext = node->ps.ps_ExprContext;
-
-	/*
-	 * get all inner tuples and insert into the hash table (or temp files)
-							   
-	 */
-	for (;;)
-	{
-		slot = ExecProcNode(outerNode);
-		if (TupIsNull(slot))
-			break;
-		hashtable->totalTuples += 1;
-		/* We have to compute the hash value */
-		econtext->ecxt_innertuple = slot;
-		hashvalue = ExecHashGetHashValue(hashtable, econtext, hashkeys,
-										 false, hashtable->keepNulls,
-										 &hashvalue); //changed from 3 variables to 5 variables (followed template) - Nicolas
-		ExecHashTableInsert(hashtable, ExecFetchSlotTuple(slot), hashvalue);
-	}
-
-	/* must provide our own instrumentation support */
-	if (node->ps.instrument)
-		InstrStopNodeMulti(node->ps.instrument, hashtable->totalTuples);
-
-	/*
-	 * We do not return the hash table directly because it's not a subtype of
-	 * Node, and so would violate the MultiExecProcNode API.  Instead, our
-	 * parent Hashjoin node is expected to know how to fish it out of our node
-	 * state.  Ugly but not really worth cleaning up, since Hashjoin knows
-	 * quite a bit more about Hash besides that.
-	 */
+	elog(ERROR, "Hash node does not support ExecProcNode call convention");
 	return NULL;
-	
-	//TODO: END
-	// END OF COPYPASTE OF MULTI
-	// _______________________________________________________________________________________
-
 }
 // FIN DE LA FONCTION CSI3530 // CSI3130 End of function
 
