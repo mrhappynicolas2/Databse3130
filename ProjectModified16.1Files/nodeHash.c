@@ -88,10 +88,35 @@ static void ExecParallelHashCloseBatchAccessors(HashJoinTable hashtable);
  *		stub for pro forma compliance
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecHash(HashState* node)
+// Modified parameters to match new body
+TupleTableSlot*
+ExecHash(PlanState* pstate, HashState* node)
 {
-	elog(ERROR, "Hash node does not support ExecProcNode call convention");
+	// Old code
+	//elog(ERROR, "Hash node does not support ExecProcNode call convention");
+	//return NULL;
+
+	// New code, based of MultiExecHash
+	/* must provide our own instrumentation support */
+	if (node->ps.instrument)
+		InstrStartNode(node->ps.instrument);
+
+	if (node->parallel_state != NULL)
+		MultiExecParallelHash(node);
+	else
+		MultiExecPrivateHash(node);
+
+	/* must provide our own instrumentation support */
+	if (node->ps.instrument)
+		InstrStopNode(node->ps.instrument, node->hashtable->partialTuples);
+
+	/*
+	 * We do not return the hash table directly because it's not a subtype of
+	 * Node, and so would violate the MultiExecProcNode API.  Instead, our
+	 * parent Hashjoin node is expected to know how to fish it out of our node
+	 * state.  Ugly but not really worth cleaning up, since Hashjoin knows
+	 * quite a bit more about Hash besides that.
+	 */
 	return NULL;
 }
 // FIN DE LA FONCTION CSI3530 // CSI3130 End of function
